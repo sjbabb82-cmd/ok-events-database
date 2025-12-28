@@ -1,66 +1,38 @@
 import requests
-import json
-import pandas as pd
 import re
 
-def run_extraction():
+def audit_structure():
     url = "https://www.travelok.com/listings/search/15"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://www.google.com/"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 
-    print(f"Connecting to {url}...")
+    print("Retrieving shell...")
     response = requests.get(url, headers=headers, timeout=30)
+    html = response.text
+
+    print(f"Total HTML Length: {len(html)} characters")
+
+    # 1. Check for the most common data scripts
+    containers = ["__NEXT_DATA__", "__PRELOADED_STATE__", "window._listingData", "window.data"]
+    for c in containers:
+        if c in html:
+            print(f"DETECTED CONTAINER: {c}")
+        else:
+            print(f"NOT FOUND: {c}")
+
+    # 2. Look for any script tag that is unusually large (likely where the data is)
+    scripts = re.findall(r'<script.*?> (.*?) </script>', html, re.DOTALL | re.VERBOSE)
+    print(f"Found {len(scripts)} script tags.")
     
-    # Save the full HTML for a one-time "Structure Audit"
-    with open("source.html", "w", encoding="utf-8") as f:
-        f.write(response.text)
+    for i, s in enumerate(scripts):
+        if len(s) > 1000:
+            print(f"Script #{i} is large ({len(s)} chars). Start of content: {s[:100].strip()}")
 
-    print("Analyzing 128KB payload...")
-
-    # Strategy A: Look for JSON blobs inside <script> tags
-    # This regex looks for common data containers in modern web apps
-    data_match = re.search(r'id="__NEXT_DATA__" type="application/json">(.*?)</script>', response.text)
-    
-    events = []
-
-    if data_match:
-        print("Found __NEXT_DATA__ blob. Parsing...")
-        full_json = json.loads(data_match.group(1))
-        # This path varies, so we'll look for anything that looks like a listing
-        # We search the dictionary recursively for the 'listings' key
-        def find_listings(obj):
-            if isinstance(obj, dict):
-                for k, v in obj.items():
-                    if k == 'listings' and isinstance(v, list):
-                        return v
-                    res = find_listings(v)
-                    if res: return res
-            elif isinstance(obj, list):
-                for item in obj:
-                    res = find_listings(item)
-                    if res: return res
-            return None
-        
-        events = find_listings(full_json) or []
-
-    # Strategy B: Fallback to raw ID scraping if JSON parsing fails
-    if not events:
-        print("JSON blob empty. Attempting raw ID extraction...")
-        # Find everything that looks like /view/NUMBER/Name
-        raw_links = re.findall(r'/listings/view/(\d+)/([^"\'>\s]+)', response.text)
-        for link in raw_links:
-            events.append({"id": link[0], "slug": link[1]})
-
-    if events:
-        df = pd.DataFrame(events).drop_duplicates()
-        df.to_csv("master.csv", index=False)
-        print(f"SUCCESS: Extracted {len(df)} events.")
-        print(f"Sample: {df.iloc[0].to_dict() if not df.empty else 'N/A'}")
-    else:
-        print("FAILED: Page loaded but data is invisible to current extraction logic.")
-        print("Check 'source.html' in the artifacts to see where the data is hidden.")
+    # 3. Look for the 'Listing ID' pattern again with a wider net
+    # Maybe they use 'id=' or 'data-id='
+    ids = re.findall(r'id=["\'](\d+)["\']', html)
+    print(f"Found {len(ids)} numeric IDs in the HTML.")
 
 if __name__ == "__main__":
-    run_extraction()
+    audit_structure()

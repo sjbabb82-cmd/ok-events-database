@@ -8,7 +8,14 @@ import urllib.parse
 API_KEY = os.getenv("ANT_KEY")
 
 def scrape():
-    # ... the rest of your code ...
+    # Debug print: This lets you check the logs to see if the key loaded
+    # (It only shows the first 4 characters for security)
+    if API_KEY:
+        print(f"✅ API Key loaded successfully (Starts with: {API_KEY[:4]}...)")
+    else:
+        print("❌ ERROR: API Key 'ANT_KEY' not found in Environment Variables!")
+        return
+
     all_events = []
     
     # Range (1, 51) gets you 50 pages (approx 1,000 events)
@@ -63,6 +70,8 @@ def scrape():
         
         new_df.to_csv("master.csv", index=False)
         print(f"✅ Master file updated with {len(all_events)} records.")
+    else:
+        print("⚠️ No events were found. Check the TravelOK website structure.")
 
 if __name__ == "__main__":
     scrape()

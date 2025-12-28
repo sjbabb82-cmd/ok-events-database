@@ -1,44 +1,25 @@
-import asyncio
-import os
-import json
-from playwright.async_api import async_playwright
+import requests
+import re
 
-BROWSER_WS_ENDPOINT = os.getenv("BROWSER_WS_ENDPOINT")
-
-async def scan_network_for_api():
-    async with async_playwright() as p:
-        print("Launching Radio Scanner...")
-        browser = await p.chromium.connect_over_cdp(BROWSER_WS_ENDPOINT)
-        page = await browser.new_page()
-
-        # We listen to every single 'conversation' the website has
-        async def handle_response(response):
-            url = response.url
-            # We ignore Google/Ads/Trackers to find the actual data source
-            if "travelok.com" in url and any(kw in url.lower() for kw in ["api", "listing", "search", "ajax"]):
-                try:
-                    # We check if the response is JSON (actual data)
-                    ctype = response.headers.get("content-type", "")
-                    if "json" in ctype:
-                        print(f"\n[!] DATA STREAM DETECTED: {url}")
-                        text = await response.text()
-                        if "name" in text or "title" in text:
-                            print(f"CONFIRMED: This stream contains event data.")
-                            print(f"SAMPLE: {text[:200]}")
-                except:
-                    pass
-
-        page.on("response", handle_response)
-
-        print("Opening TravelOK and waiting for the background data to load...")
-        # We go to the page and wait for it to be completely finished
-        await page.goto("https://www.travelok.com/listings/search/15", wait_until="networkidle")
-        
-        # We wait an extra 10 seconds in case the data is 'lazy-loaded'
-        await asyncio.sleep(10)
-        
-        await browser.close()
-        print("\nScanner complete.")
+def raw_audit():
+    url = "https://www.travelok.com/listings/search/15"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+    
+    r = requests.get(url, headers=headers)
+    html = r.text
+    
+    print(f"--- HEAD CONTENT (First 1000 chars) ---\n{html[:1000]}")
+    
+    # Find all script tags that assign variables
+    vars = re.findall(r'var\s+(\w+)\s*=', html)
+    windows_vars = re.findall(r'window\.(\w+)\s*=', html)
+    
+    print(f"\n--- JS VARIABLES FOUND ---\n{list(set(vars + windows_vars))}")
+    
+    # Check if the text 'listing' appears anywhere, even if not in a link
+    print(f"\n--- KEYWORD CHECK ---")
+    print(f"Count of 'listing': {html.lower().count('listing')}")
+    print(f"Count of 'event': {html.lower().count('event')}")
 
 if __name__ == "__main__":
-    asyncio.run(scan_network_for_api())
+    raw_audit()

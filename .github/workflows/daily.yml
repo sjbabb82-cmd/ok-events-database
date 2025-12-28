@@ -1,15 +1,29 @@
 name: Gemini Debug Agent
 on:
+  push:
+    branches: [ main ]
   issue_comment:
     types: [created]
+
 jobs:
   run_agent:
-    if: contains(github.event.comment.body, '/test')
+    # Run if you comment /test OR if you just push a change
+    if: github.event_name == 'push' || contains(github.event.comment.body, '/test')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Give me access to the full history
+
       - name: Run Gemini Agent
         uses: google-github-actions/run-gemini-cli@v0
         with:
           google_api_key: ${{ secrets.GEMINI_API_KEY }}
-          prompt: "Analyze the last failed run of 'scraper.py'. Rewrite the code to fix the error, commit the change to the main branch, and trigger the 'TravelOK Stealth' workflow again."
+          # This is the "Engine" prompt. I am telling my agent version what to do.
+          prompt: |
+            1. Read the latest failure logs from the 'TravelOK Stealth' workflow.
+            2. Analyze 'scraper.py' and identify why it timed out.
+            3. Rewrite 'scraper.py' with a fix (e.g., trying a different user agent or adding a proxy).
+            4. Automatically commit the fix and push it to 'main'.
+            5. Re-trigger the 'TravelOK Stealth' workflow.
+            6. Repeat until 'master.csv' is successfully created.

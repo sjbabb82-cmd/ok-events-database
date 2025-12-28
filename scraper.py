@@ -15,65 +15,77 @@ async def run_proprietary_engine():
         
         for i in range(1, 6):
             url = f"https://www.travelok.com/listings/search/15?page={i}"
-            print(f"Scanning Page {i}...")
+            print(f"Aggressive Scan Page {i}...")
             
             try:
                 await page.goto(url, wait_until="networkidle", timeout=60000)
+                # Allow time for the dynamic content to settle
+                await asyncio.sleep(5)
                 
-                # Wait for at least one listing to appear
-                await page.wait_for_selector("a:has-text('LEARN MORE')", timeout=10000)
+                # Injection Logic: This runs directly in the browser's console
+                # It finds every link and grabs the text and URL
+                extracted_data = await page.evaluate("""
+                    () => {
+                        const results = [];
+                        const links = document.querySelectorAll('a');
+                        links.forEach(link => {
+                            const href = link.getAttribute('href');
+                            if (href && href.includes('/listings/view/')) {
+                                // Find the closest parent that might contain the title
+                                // or use the text of the link itself
+                                results.append({
+                                    url: href,
+                                    text: link.innerText
+                                });
+                            }
+                        });
+                        return results;
+                    }
+                """)
+                
+                # If the JS injection finds 0, we try an even broader search 
+                # looking for anything with 'view' in the href
+                if not extracted_data:
+                    extracted_data = await page.evaluate("""
+                        () => {
+                            return Array.from(document.links)
+                                .filter(l => l.href.includes('/view/'))
+                                .map(l => ({ url: l.href, text: l.innerText }));
+                        }
+                    """)
 
-                # Find every container that holds an event
-                # TravelOK uses 'listing-item' as the main wrapper
-                containers = await page.query_selector_all(".listing-item")
-                
                 page_count = 0
-                for box in containers:
-                    # Within this specific box, find the title and link
-                    title_el = await box.query_selector("h3, .listing-title, .title")
-                    link_el = await box.query_selector("a:has-text('LEARN MORE')")
+                for item in extracted_data:
+                    href = item['url']
+                    title = item['text']
                     
-                    if title_el and link_el:
-                        title_text = await title_el.inner_text()
-                        href = await link_el.get_attribute("href")
+                    if href:
+                        clean_url = "https://www.travelok.com" + href if href.startswith("/") else href
+                        # Use the last part of the URL as the unique ID
+                        event_id = clean_url.split('/')[-1]
                         
-                        if href and "/view/" in href:
-                            clean_url = "https://www.travelok.com" + href if href.startswith("/") else href
-                            all_events.append({
-                                "id": href.split("/")[-1],
-                                "title": title_text.strip(),
-                                "url": clean_url
-                            })
-                            page_count += 1
-
-                # FALLBACK: If containers weren't found, find all LEARN MORE links directly
-                if page_count == 0:
-                    links = await page.query_selector_all("a:has-text('LEARN MORE')")
-                    for link in links:
-                        href = await link.get_attribute("href")
-                        # Look 'up' from the link to find the nearest header
-                        title_text = await page.evaluate("(el) => el.closest('.listing-item, div').querySelector('h3, .title, .listing-title')?.innerText", link)
-                        
-                        if href and "/view/" in href:
-                            clean_url = "https://www.travelok.com" + href if href.startswith("/") else href
-                            all_events.append({
-                                "id": href.split("/")[-1],
-                                "title": title_text.strip() if title_text else "Event",
-                                "url": clean_url
-                            })
-                            page_count += 1
+                        all_events.append({
+                            "id": event_id,
+                            "title": title.strip() if title else "Event",
+                            "url": clean_url
+                        })
+                        page_count += 1
                 
-                print(f"Page {i}: Captured {page_count} events")
+                print(f"Page {i}: Injected script found {page_count} links.")
                 
             except Exception as e:
                 print(f"Error on Page {i}: {str(e)[:50]}")
 
         if all_events:
             df = pd.DataFrame(all_events).drop_duplicates(subset=['url'])
+            # Filter out entries where title is just 'LEARN MORE' to keep the data clean
             df.to_csv("master.csv", index=False)
             print(f"Success: {len(df)} total unique events saved.")
         else:
-            print("Failed to find any events. Check debug screenshot.")
+            print("Injection failed. Checking page structure one last time...")
+            # Capture the raw HTML for one last look
+            content = await page.content()
+            print(f"HTML Length: {len(content)} characters.")
         
         await browser.close()
 

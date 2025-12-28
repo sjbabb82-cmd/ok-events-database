@@ -1,0 +1,29 @@
+name: Daily Oklahoma Scrape
+on:
+  schedule:
+    - cron: '0 12 * * *' # This is 6:00 AM CST
+  workflow_dispatch: # This adds a manual "Play" button
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Important: Allows the bot to save the CSVs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install Tools
+        run: |
+          pip install playwright pandas
+          playwright install --with-deps chromium
+      - name: Run Scraper
+        run: python scraper.py
+      - name: Save Results
+        run: |
+          git config user.name "ScraperBot"
+          git config user.email "bot@github.com"
+          git add -A
+          git commit -m "Auto-update $(date)" || exit 0
+          git push

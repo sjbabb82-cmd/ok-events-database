@@ -1,6 +1,6 @@
 import asyncio
 import pandas as pd
-import os
+import re
 from playwright.async_api import async_playwright
 
 async def run_proprietary_engine():
@@ -15,69 +15,43 @@ async def run_proprietary_engine():
         
         for i in range(1, 6):
             url = f"https://www.travelok.com/listings/search/15?page={i}"
-            print(f"Shadow Piercing Scan Page {i}...")
+            print(f"Regex Scanning Page {i}...")
             
             try:
-                await page.goto(url, wait_until="networkidle", timeout=60000)
-                await asyncio.sleep(5) # Let Shadow DOM finish mounting
+                await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                # Wait for the text we know exists from your previous log
+                await page.wait_for_selector("text=LEARN MORE", timeout=20000)
                 
-                # This script recursively searches every shadow root on the page for links
-                extracted_data = await page.evaluate("""
-                    () => {
-                        const results = [];
-                        const findLinks = (root) => {
-                            if (!root) return;
-                            
-                            // Check standard links
-                            root.querySelectorAll('a').forEach(link => {
-                                const href = link.getAttribute('href');
-                                if (href && href.includes('/view/')) {
-                                    results.push({ url: href, text: link.innerText });
-                                }
-                            });
-                            
-                            // Pierce into Shadow DOMs
-                            const elements = root.querySelectorAll('*');
-                            elements.forEach(el => {
-                                if (el.shadowRoot) {
-                                    findLinks(el.shadowRoot);
-                                }
-                            });
-                        };
-                        
-                        findLinks(document);
-                        return results;
-                    }
-                """)
-
+                # Get the entire raw HTML as a string
+                raw_html = await page.content()
+                
+                # Find all URLs matching the travelok listing pattern
+                # Pattern: /listings/view/anything-here/number
+                found_links = re.findall(r'/listings/view/[a-zA-Z0-9\-/]+/\d+', raw_html)
+                
                 page_count = 0
-                for item in extracted_data:
-                    href = item['url']
-                    title = item['text']
-                    
-                    if href:
-                        clean_url = "https://www.travelok.com" + href if href.startswith("/") else href
-                        event_id = clean_url.split('/')[-1]
-                        
-                        all_events.append({
-                            "id": event_id,
-                            "title": title.strip() if title else "Event",
-                            "url": clean_url
-                        })
-                        page_count += 1
+                for link in set(found_links): # set() removes duplicates on the same page
+                    event_id = link.split('/')[-1]
+                    # We create a placeholder title because title extraction 
+                    # from raw HTML regex is unreliable. We will fix titles later.
+                    all_events.append({
+                        "id": event_id,
+                        "title": f"Event {event_id}", 
+                        "url": f"https://www.travelok.com{link}"
+                    })
+                    page_count += 1
                 
-                print(f"Page {i}: Captured {page_count} hidden links.")
+                print(f"Page {i}: Found {page_count} links via Regex.")
                 
             except Exception as e:
                 print(f"Error on Page {i}: {str(e)[:50]}")
 
         if all_events:
             df = pd.DataFrame(all_events).drop_duplicates(subset=['url'])
-            # Filter out generic 'LEARN MORE' titles if better ones are available nearby
             df.to_csv("master.csv", index=False)
-            print(f"Success: {len(df)} total unique events saved.")
+            print(f"Success: {len(df)} unique URLs saved.")
         else:
-            print("Shadow piercing failed. Site might be using canvas or encrypted data.")
+            print("Regex scan found nothing. Website may be obfuscating URLs.")
         
         await browser.close()
 

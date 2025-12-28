@@ -19,8 +19,8 @@ jobs:
         run: python scraper.py
         env:
           BROWSER_WS_ENDPOINT: ${{ secrets.BROWSER_WS_ENDPOINT }}
-      - name: Upload Results
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: events-data
+          name: events-csv
           path: master.csv

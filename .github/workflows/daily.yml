@@ -1,38 +1,55 @@
-name: Proprietary Scraper
+name: Proprietary Event Scraper
+
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '0 12 * * *'
+    - cron: '0 0 * * *' # Runs daily at midnight
+  workflow_dispatch:      # Allows you to run it manually for testing
 
 jobs:
-  scrape:
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      
+
       - name: Install Dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install playwright pandas
-          playwright install chromium --with-deps
-          
+          playwright install chromium
+          # This installs the system libraries needed for Chromium to run on Linux
+          playwright install-deps chromium
+
       - name: Run Proprietary Engine
+        env:
+          ANT_KEY: ${{ secrets.ANT_KEY }}
         run: python scraper.py
-        
-      - name: Upload Debug Screenshot
+
+      - name: Upload Debug Package
+        if: always() # Runs even if the scraper fails
         uses: actions/upload-artifact@v4
         with:
-          name: site-screenshot
-          path: debug_screenshot.png
+          name: debug-files
+          path: |
+            debug_screenshot.png
+            debug_site.html
 
-      - name: Sync Data to Repo
+      - name: Commit and Push Results
         run: |
-          git config user.name "ProprietaryBot"
-          git config user.email "bot@github.com"
-          git add master.csv
-          git commit -m "Data refresh" || exit 0
-          git push
+          git config --local user.email "bot@github.com"
+          git config --local user.name "ProprietaryBot"
+          
+          # Check if the file exists and has content before trying to commit
+          if [ -s master.csv ]; then
+            git add master.csv
+            git commit -m "Automated data refresh: $(date)"
+            git push
+          else
+            echo "No data found or master.csv is empty. Skipping commit."
+          fi

@@ -1,57 +1,67 @@
-import asyncio
+import requests
+from bs4 import BeautifulSoup
 import pandas as pd
 import os
-from playwright.async_api import async_playwright
+import urllib.parse
 
-async def run():
-    async with async_playwright() as p:
-        # 1. Launch with extra arguments to look like a real PC
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={'width': 1280, 'height': 720}
-        )
-        page = await context.new_page()
-        
-        results = []
-        # Let's test just Page 1 and Page 2 first to ensure it's working
-        for i in range(1, 3): 
-            url = f"https://www.travelok.com/listings/search/15?page={i}"
-            print(f"Attempting to scrape: {url}")
-            
-            try:
-                # Increased timeout and 'networkidle' to ensure JS loads
-                await page.goto(url, wait_until="networkidle", timeout=60000)
-                
-                # Check if we got blocked
-                content = await page.content()
-                if "Access Denied" in content or "Cloudflare" in content:
-                    print(f"⚠️ BLOCKED by website security on page {i}")
-                    continue
+# PASTE YOUR KEY HERE
+API_KEY = "9e00d89f36794b4d8830c66e5b3c1b73"
 
-                # Wait for the specific event cards
-                await page.wait_for_selector(".listing-item", timeout=15000)
-                items = await page.query_selector_all(".listing-item")
-                
-                print(f"Found {len(items)} items on page {i}")
-                
-                for item in items:
-                    title_el = await item.query_selector(".listing-title")
-                    results.append({
-                        "id": await item.get_attribute("data-id"),
-                        "title": await title_el.inner_text() if title_el else "N/A",
-                    })
-            except Exception as e:
-                print(f"❌ Error on page {i}: {str(e)}")
+def scrape():
+    all_events = []
+    
+    # Range (1, 51) gets you 50 pages (approx 1,000 events)
+    for page_num in range(1, 51): 
+        print(f"Requesting Page {page_num}...")
         
-        if results:
-            df = pd.DataFrame(results)
-            df.to_csv("master.csv", index=False)
-            print(f"✅ Success! Saved {len(results)} records to master.csv")
-        else:
-            print("⚠️ No data found. master.csv will remain empty.")
+        target_url = f"https://www.travelok.com/listings/search/15?page={page_num}"
+        # We encode the URL so the proxy understands it correctly
+        encoded_url = urllib.parse.quote_plus(target_url)
+        
+        # We use 'browser=false' to save credits since we just need the HTML
+        proxy_url = f"https://api.scrapingant.com/v2/general?url={encoded_url}&x-api-key={API_KEY}&browser=false"
+        
+        try:
+            response = requests.get(proxy_url, timeout=30)
+            if response.status_code != 200:
+                print(f"⚠️ Proxy returned error {response.status_code}. Stopping.")
+                break
+                
+            soup = BeautifulSoup(response.text, 'html.parser')
+            items = soup.find_all('div', class_='listing-item')
             
-        await browser.close()
+            if not items:
+                print(f"Reached the end or got blocked at page {page_num}.")
+                break
+                
+            for item in items:
+                title_el = item.find('div', class_='listing-title')
+                all_events.append({
+                    "id": item.get('data-id'),
+                    "title": title_el.text.strip() if title_el else "N/A",
+                    "date": item.find('div', class_='listing-date').text.strip() if item.find('div', class_='listing-date') else "N/A",
+                    "img": item.find('img')['src'] if item.find('img') else "N/A"
+                })
+        except Exception as e:
+            print(f"Error on page {page_num}: {e}")
+
+    if all_events:
+        new_df = pd.DataFrame(all_events)
+        
+        # Compare with last run
+        if os.path.exists("master.csv"):
+            old_df = pd.read_csv("master.csv")
+            # Items in NEW but not in OLD
+            added = new_df[~new_df['id'].astype(str).isin(old_df['id'].astype(str))]
+            # Items in OLD but not in NEW
+            removed = old_df[~old_df['id'].astype(str).isin(new_df['id'].astype(str))]
+            
+            added.to_csv("NEW_EVENTS.csv", index=False)
+            removed.to_csv("DELETED_EVENTS.csv", index=False)
+            print(f"✨ Found {len(added)} new and {len(removed)} deleted events.")
+        
+        new_df.to_csv("master.csv", index=False)
+        print(f"✅ Master file updated with {len(all_events)} records.")
 
 if __name__ == "__main__":
-    asyncio.run(run())
+    scrape()

@@ -1,54 +1,41 @@
 import asyncio
 from playwright.async_api import async_playwright
 import pandas as pd
-import os
-
-async def get_details(context, url):
-    page = await context.new_page()
-    try:
-        await page.goto(url, timeout=15000)
-        # Targeted selectors for organizer info
-        organizer = await page.query_selector(".listing-contact")
-        text = await organizer.inner_text() if organizer else "No Info"
-        await page.close()
-        return text.strip()
-    except:
-        await page.close()
-        return "N/A"
+import random
 
 async def run():
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(user_agent="Mozilla/5.0")
+        # Launch with 'Stealth' arguments
+        browser = await p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"])
+        # Use a real browser's "Identity Card" (User Agent)
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+            viewport={'width': 1920, 'height': 1080}
+        )
         page = await context.new_page()
         
         results = []
-        for i in range(1, 51): # Hits 50 pages (approx 1000 records)
-            print(f"Scraping Page {i}...")
-            await page.goto(f"https://www.travelok.com/listings/search/15?page={i}")
-            await page.wait_for_selector(".listing-item")
-            
-            items = await page.query_selector_all(".listing-item")
-            for item in items:
-                link_el = await item.query_selector("a.listing-btn")
-                link = "https://www.travelok.com" + await link_el.get_attribute("href")
+        for i in range(1, 11): # Start with just 10 pages to test stability
+            print(f"Human-mimic scraping Page {i}...")
+            try:
+                # Add a random delay so we don't look like a machine (1 to 4 seconds)
+                await asyncio.sleep(random.uniform(1, 4)) 
                 
-                results.append({
-                    "id": await item.get_attribute("data-id"),
-                    "title": await (await item.query_selector(".listing-title")).inner_text(),
-                    "date": await (await item.query_selector(".listing-date")).inner_text(),
-                    "img": await (await item.query_selector("img")).get_attribute("src"),
-                    "organizer": await get_details(context, link) # Deep scrape
-                })
+                await page.goto(f"https://www.travelok.com/listings/search/15?page={i}", wait_until="networkidle")
+                
+                # Check if the events actually appeared
+                await page.wait_for_selector(".listing-item", timeout=15000)
+                
+                items = await page.query_selector_all(".listing-item")
+                for item in items:
+                    results.append({
+                        "id": await item.get_attribute("data-id"),
+                        "title": await (await item.query_selector(".listing-title")).inner_text(),
+                    })
+            except Exception as e:
+                print(f"Page {i} failed or timed out. Moving on.")
         
-        df_new = pd.DataFrame(results)
-        # Diff Logic (New vs Deleted)
-        if os.path.exists("master.csv"):
-            df_old = pd.read_csv("master.csv")
-            df_new[~df_new['id'].isin(df_old['id'])].to_csv("NEW_EVENTS.csv", index=False)
-            df_old[~df_old['id'].isin(df_new['id'])].to_csv("DELETED_EVENTS.csv", index=False)
-        
-        df_new.to_csv("master.csv", index=False)
+        pd.DataFrame(results).to_csv("master.csv", index=False)
         await browser.close()
 
 if __name__ == "__main__":

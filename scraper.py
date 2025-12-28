@@ -1,25 +1,29 @@
 import requests
 import re
 
-def raw_audit():
+def final_diagnostic():
     url = "https://www.travelok.com/listings/search/15"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
     
     r = requests.get(url, headers=headers)
     html = r.text
     
-    print(f"--- HEAD CONTENT (First 1000 chars) ---\n{html[:1000]}")
+    print(f"--- DIAGNOSTIC REPORT ---")
+    print(f"Total Chars: {len(html)}")
     
-    # Find all script tags that assign variables
-    vars = re.findall(r'var\s+(\w+)\s*=', html)
-    windows_vars = re.findall(r'window\.(\w+)\s*=', html)
+    # 1. Show the first 500 characters (Metadata/Framework check)
+    print(f"START OF HTML:\n{html[:500]}\n")
     
-    print(f"\n--- JS VARIABLES FOUND ---\n{list(set(vars + windows_vars))}")
+    # 2. Show the last 2000 characters (This is where 'State' usually lives)
+    print(f"END OF HTML:\n{html[-2000:]}\n")
     
-    # Check if the text 'listing' appears anywhere, even if not in a link
-    print(f"\n--- KEYWORD CHECK ---")
-    print(f"Count of 'listing': {html.lower().count('listing')}")
-    print(f"Count of 'event': {html.lower().count('event')}")
+    # 3. Find every <script> tag and report its size and first 50 chars
+    scripts = re.findall(r'<script.*?>', html)
+    print(f"Found {len(scripts)} script tags.")
+    
+    # 4. Search for the specific 'Listing' ID we know exists on the site
+    # If this is 0, the data is definitely encoded/obfuscated.
+    print(f"Literal 'listing' matches: {html.lower().count('listing')}")
 
 if __name__ == "__main__":
-    raw_audit()
+    final_diagnostic()

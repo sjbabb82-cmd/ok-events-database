@@ -17,7 +17,7 @@ async def run_proprietary_engine():
         # Testing with first 5 pages
         for i in range(1, 6):
             url = f"https://www.travelok.com/listings/search/15?page={i}"
-            print(f"🕵️ Engine visiting: {url}")
+            print(f"Engine visiting: {url}")
             
             try:
                 await page.goto(url, wait_until="networkidle", timeout=60000)
@@ -25,7 +25,7 @@ async def run_proprietary_engine():
                 # Take a screenshot of Page 1 to verify what the robot sees
                 if i == 1:
                     await page.screenshot(path="debug_screenshot.png")
-                    print("📸 Screenshot saved as debug_screenshot.png")
+                    print("Screenshot saved as debug_screenshot.png")
 
                 # Wait for the listings to actually load in the browser
                 await page.wait_for_selector(".listing-item", timeout=15000)
@@ -41,15 +41,15 @@ async def run_proprietary_engine():
                         "url": "https://www.travelok.com" + await (await item.query_selector("a")).get_attribute("href")
                     })
                 
-                print(f"✅ Found {len(items)} events on Page {i}")
+                print(f"Found {len(items)} events on Page {i}")
                 
             except Exception as e:
-                print(f"❌ Error on Page {i}: {str(e)[:100]}")
+                print(f"Error on Page {i}: {str(e)[:100]}")
 
         # Save to CSV
         if all_events:
             pd.DataFrame(all_events).to_csv("master.csv", index=False)
-            print(f"📊 Final Count: {len(all_events)} items saved to master.csv")
+            print(f"Final Count: {len(all_events)} items saved to master.csv")
         
         await browser.close()
 

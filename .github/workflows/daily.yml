@@ -1,32 +1,38 @@
-name: Daily Oklahoma Scrape
+name: Proprietary Scraper
 on:
+  workflow_dispatch:
   schedule:
-    - cron: '0 12 * * *' # 6:00 AM CST
-  workflow_dispatch: # Allows you to click "Run Workflow" manually
+    - cron: '0 12 * * *'
 
 jobs:
-  build:
+  scrape:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Allows the bot to save CSV files to your repo
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
       
-      - name: Install Tools
-        run: pip install requests beautifulsoup4 pandas
-      
-      - name: Run Scraper
-        env:
-          ANT_KEY: ${{ secrets.ANT_KEY }} # Bridges your secret to the code
-        run: python scraper.py
-      
-      - name: Save Results
+      - name: Install Dependencies
         run: |
-          git config user.name "ScraperBot"
+          pip install playwright pandas
+          playwright install chromium --with-deps
+          
+      - name: Run Proprietary Engine
+        run: python scraper.py
+        
+      - name: Upload Debug Screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-screenshot
+          path: debug_screenshot.png
+
+      - name: Sync Data to Repo
+        run: |
+          git config user.name "ProprietaryBot"
           git config user.email "bot@github.com"
-          git add -A
-          git commit -m "Auto-update $(date)" || exit 0
+          git add master.csv
+          git commit -m "Data refresh" || exit 0
           git push

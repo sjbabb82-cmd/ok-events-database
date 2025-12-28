@@ -4,10 +4,11 @@ import pandas as pd
 import os
 import urllib.parse
 
-# PASTE YOUR KEY HERE
-API_KEY = "9e00d89f36794b4d8830c66e5b3c1b73"
+# This looks for the secret you named 'ANT_KEY' in GitHub Settings
+API_KEY = os.getenv("ANT_KEY")
 
 def scrape():
+    # ... the rest of your code ...
     all_events = []
     
     # Range (1, 51) gets you 50 pages (approx 1,000 events)

@@ -1,68 +1,57 @@
-import requests
-from bs4 import BeautifulSoup
+import asyncio
 import pandas as pd
 import os
+from playwright.async_api import async_playwright
 
-API_KEY = os.getenv("ANT_KEY")
-
-def scrape():
-    if not API_KEY:
-        print("❌ ERROR: API Key 'ANT_KEY' not found!")
-        return
-
-    all_events = []
-    
-    # Let's do 50 pages (1,000 events)
-    for page_num in range(1, 51): 
-        print(f"Requesting Page {page_num}...")
-        target_url = f"https://www.travelok.com/listings/search/15?page={page_num}"
+async def run_proprietary_engine():
+    async with async_playwright() as p:
+        # Launching the browser
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0"
+        )
+        page = await context.new_page()
         
-        params = {
-            "url": target_url,
-            "x-api-key": API_KEY,
-            "browser": "false" 
-        }
+        all_events = []
         
-        try:
-            response = requests.get("https://api.scrapingant.com/v2/general", params=params, timeout=30)
-            soup = BeautifulSoup(response.text, 'html.parser')
+        # Testing with first 5 pages
+        for i in range(1, 6):
+            url = f"https://www.travelok.com/listings/search/15?page={i}"
+            print(f"🕵️ Engine visiting: {url}")
             
-            # This is the 'Vision' part that looks for event cards
-            items = soup.find_all(class_=["listing-item", "list-item"])
-            
-            if not items:
-                print(f"⚠️ Page {page_num} appeared empty. Stopping.")
-                break
-                
-            for item in items:
-                title_el = item.find(['h3', 'h2', 'div'], class_=["listing-title", "title"])
-                all_events.append({
-                    "id": item.get('data-id', 'N/A'),
-                    "title": title_el.text.strip() if title_el else "Unknown Event",
-                    "url": "https://www.travelok.com" + item.find('a')['href'] if item.find('a') else "N/A"
-                })
-        except Exception as e:
-            print(f"Error on page {page_num}: {e}")
-
-    if all_events:
-        new_df = pd.DataFrame(all_events)
-        
-        # --- FIXED SAFETY CHECK ---
-        # Only compare if master.csv exists AND is not empty
-        if os.path.exists("master.csv") and os.path.getsize("master.csv") > 0:
             try:
-                old_df = pd.read_csv("master.csv")
-                added = new_df[~new_df['id'].astype(str).isin(old_df['id'].astype(str))]
-                added.to_csv("NEW_EVENTS.csv", index=False)
-                print(f"✨ Found {len(added)} new events.")
+                await page.goto(url, wait_until="networkidle", timeout=60000)
+                
+                # Take a screenshot of Page 1 to verify what the robot sees
+                if i == 1:
+                    await page.screenshot(path="debug_screenshot.png")
+                    print("📸 Screenshot saved as debug_screenshot.png")
+
+                # Wait for the listings to actually load in the browser
+                await page.wait_for_selector(".listing-item", timeout=15000)
+                
+                items = await page.query_selector_all(".listing-item")
+                for item in items:
+                    title_el = await item.query_selector(".listing-title")
+                    title = await title_el.inner_text() if title_el else "N/A"
+                    
+                    all_events.append({
+                        "id": await item.get_attribute("data-id"),
+                        "title": title.strip(),
+                        "url": "https://www.travelok.com" + await (await item.query_selector("a")).get_attribute("href")
+                    })
+                
+                print(f"✅ Found {len(items)} events on Page {i}")
+                
             except Exception as e:
-                print(f"Note: Could not read old master.csv ({e}). Skipping comparison.")
+                print(f"❌ Error on Page {i}: {str(e)[:100]}")
+
+        # Save to CSV
+        if all_events:
+            pd.DataFrame(all_events).to_csv("master.csv", index=False)
+            print(f"📊 Final Count: {len(all_events)} items saved to master.csv")
         
-        # Save the new data as the new master
-        new_df.to_csv("master.csv", index=False)
-        print(f"✅ Success! Captured {len(all_events)} events into master.csv")
-    else:
-        print("⚠️ No events were found at all.")
+        await browser.close()
 
 if __name__ == "__main__":
-    scrape()
+    asyncio.run(run_proprietary_engine())

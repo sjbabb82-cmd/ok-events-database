@@ -15,33 +15,29 @@ async def run_proprietary_engine():
         
         for i in range(1, 6):
             url = f"https://www.travelok.com/listings/search/15?page={i}"
-            print(f"Surgical Scan Page {i}: {url}")
+            print(f"Scanning Page {i}...")
             
             try:
                 await page.goto(url, wait_until="networkidle", timeout=60000)
                 
-                # Wait for the specific text we saw in your log
-                try:
-                    await page.wait_for_selector("text=LEARN MORE", timeout=15000)
-                except:
-                    print(f"Timeout waiting for 'LEARN MORE' on page {i}")
+                # Wait for at least one listing to appear
+                await page.wait_for_selector("a:has-text('LEARN MORE')", timeout=10000)
 
-                # Extraction Logic:
-                # Based on the text log, events are grouped. 
-                # We will find all 'LEARN MORE' links and their surrounding titles.
-                listings = await page.query_selector_all("//div[contains(@class, 'listing')] | //div[contains(@class, 'item')]")
+                # Find every container that holds an event
+                # TravelOK uses 'listing-item' as the main wrapper
+                containers = await page.query_selector_all(".listing-item")
                 
                 page_count = 0
-                for item in listings:
-                    # Look for the title (usually a heading or bold text above LEARN MORE)
-                    title_el = await item.query_selector("h3, .listing-title, .title")
-                    link_el = await item.query_selector("a:has-text('LEARN MORE'), a.btn, .learn-more a")
+                for box in containers:
+                    # Within this specific box, find the title and link
+                    title_el = await box.query_selector("h3, .listing-title, .title")
+                    link_el = await box.query_selector("a:has-text('LEARN MORE')")
                     
                     if title_el and link_el:
                         title_text = await title_el.inner_text()
                         href = await link_el.get_attribute("href")
                         
-                        if href:
+                        if href and "/view/" in href:
                             clean_url = "https://www.travelok.com" + href if href.startswith("/") else href
                             all_events.append({
                                 "id": href.split("/")[-1],
@@ -49,16 +45,16 @@ async def run_proprietary_engine():
                                 "url": clean_url
                             })
                             page_count += 1
-                
-                # Fallback: If the structured search fails, just grab EVERY link that says LEARN MORE
+
+                # FALLBACK: If containers weren't found, find all LEARN MORE links directly
                 if page_count == 0:
-                    backup_links = await page.query_selector_all("a:has-text('LEARN MORE')")
-                    for link in backup_links:
+                    links = await page.query_selector_all("a:has-text('LEARN MORE')")
+                    for link in links:
                         href = await link.get_attribute("href")
-                        # Look for a title nearby (the previous sibling or parent's heading)
-                        title_text = await page.evaluate("(el) => el.parentElement.parentElement.querySelector('h3, .title')?.innerText", link)
+                        # Look 'up' from the link to find the nearest header
+                        title_text = await page.evaluate("(el) => el.closest('.listing-item, div').querySelector('h3, .title, .listing-title')?.innerText", link)
                         
-                        if href:
+                        if href and "/view/" in href:
                             clean_url = "https://www.travelok.com" + href if href.startswith("/") else href
                             all_events.append({
                                 "id": href.split("/")[-1],
@@ -66,18 +62,18 @@ async def run_proprietary_engine():
                                 "url": clean_url
                             })
                             page_count += 1
-
-                print(f"Captured {page_count} events from Page {i}")
+                
+                print(f"Page {i}: Captured {page_count} events")
                 
             except Exception as e:
-                print(f"Error on Page {i}: {str(e)[:100]}")
+                print(f"Error on Page {i}: {str(e)[:50]}")
 
         if all_events:
             df = pd.DataFrame(all_events).drop_duplicates(subset=['url'])
             df.to_csv("master.csv", index=False)
-            print(f"Final Count: {len(df)} unique events saved.")
+            print(f"Success: {len(df)} total unique events saved.")
         else:
-            print("Extraction failed. The elements are likely inside a Shadow DOM.")
+            print("Failed to find any events. Check debug screenshot.")
         
         await browser.close()
 

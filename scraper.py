@@ -1,47 +1,41 @@
 import requests
-from bs4 import BeautifulSoup
+import re
 import pandas as pd
 
-def scrape_travel_ok():
+def clean_slate_extract():
     url = "https://www.travelok.com/listings/search/15"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
     
-    print("Fetching listings...")
+    print("Fetching raw data...")
     r = requests.get(url, headers=headers)
-    soup = BeautifulSoup(r.text, 'html.parser')
+    html = r.text
+    
+    # We are looking for the pattern: /view/NUMBER/SLUG
+    # Example: /view/28491/redbud-festival
+    pattern = r'/view/(\d+)/([a-z0-9\-]+)'
+    matches = re.findall(pattern, html.lower())
     
     events = []
-    
-    # TravelOK listings are typically wrapped in 'listing' or 'result' classes
-    # We are going to find every link that points to a 'view' page
-    links = soup.find_all('a', href=True)
-    
-    for link in links:
-        href = link['href']
-        if '/listings/view/' in href:
-            # Extract the ID and the Title/Name from the URL and link text
-            # URL format: /listings/view/12345/event-name
-            parts = href.split('/')
-            if len(parts) >= 4:
-                listing_id = parts[3]
-                title = link.get_text(strip=True) or parts[-1].replace('-', ' ').title()
-                
-                events.append({
-                    "id": listing_id,
-                    "title": title,
-                    "url": f"https://www.travelok.com{href}"
-                })
+    for match in matches:
+        listing_id = match[0]
+        slug = match[1].replace('-', ' ').title()
+        events.append({
+            "id": listing_id,
+            "title": slug,
+            "url": f"https://www.travelok.com/listings/view/{listing_id}"
+        })
 
     if events:
         df = pd.DataFrame(events).drop_duplicates(subset=['id'])
         df.to_csv("master.csv", index=False)
-        print(f"SUCCESS: Extracted {len(df)} unique events.")
-        print(df.head())
+        print(f"SUCCESS: Captured {len(df)} events using pattern matching.")
+        print(df.head(10))
     else:
-        print("FAILED: No listings found in the HTML structure. Dumping names of all classes found...")
-        # Emergency backup: print all class names found in the page
-        classes = set([cls for tag in soup.find_all(True) if tag.get('class') for cls in tag.get('class')])
-        print(f"Available CSS classes: {list(classes)[:20]}")
+        print("PATTERN MATCH FAILED.")
+        # If this fails, we need to see exactly what follows the word 'listing'
+        # Let's find the first instance of 'listing' and print the surrounding 200 chars
+        idx = html.lower().find('listing')
+        print(f"CONTEXT AROUND 'LISTING':\n...{html[idx:idx+300]}...")
 
 if __name__ == "__main__":
-    scrape_travel_ok()
+    clean_slate_extract()

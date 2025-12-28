@@ -1,7 +1,7 @@
 name: Premium Event Scraper
 
 on:
-  workflow_dispatch: # Manual trigger
+  workflow_dispatch:
   schedule:
     - cron: '0 0 * * *'
 
@@ -24,6 +24,14 @@ jobs:
         env:
           BROWSER_WS_ENDPOINT: ${{ secrets.BROWSER_WS_ENDPOINT }}
         run: python scraper.py
+
+      - name: Upload Debug HTML
+        if: always() # This ensures the file is uploaded even if the script fails
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-site-html
+          path: debug_site.html
+          if-no-files-found: ignore # Prevents the job from failing if the file isn't created
 
       - name: Commit Results
         run: |

@@ -1,29 +1,22 @@
-name: Gemini Debug Agent
+name: Gemini Dispatch
 on:
-  push:
-    branches: [ main ]
   issue_comment:
     types: [created]
+  workflow_dispatch:
 
 jobs:
-  run_agent:
-    # Run if you comment /test OR if you just push a change
-    if: github.event_name == 'push' || contains(github.event.comment.body, '/test')
+  gemini-job:
+    if: contains(github.event.comment.body, '/test') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # Give me access to the full history
-
-      - name: Run Gemini Agent
-        uses: google-github-actions/run-gemini-cli@v0
+      - name: Gemini Assistant
+        uses: google-github-actions/run-gemini-cli@v1
         with:
           google_api_key: ${{ secrets.GEMINI_API_KEY }}
-          # This is the "Engine" prompt. I am telling my agent version what to do.
-          prompt: |
-            1. Read the latest failure logs from the 'TravelOK Stealth' workflow.
-            2. Analyze 'scraper.py' and identify why it timed out.
-            3. Rewrite 'scraper.py' with a fix (e.g., trying a different user agent or adding a proxy).
-            4. Automatically commit the fix and push it to 'main'.
-            5. Re-trigger the 'TravelOK Stealth' workflow.
-            6. Repeat until 'master.csv' is successfully created.
+          # I'm telling the agent to ignore branch protections and force the fix
+          prompt: "The previous run failed. Rewrite 'scraper.py' using curl_cffi to bypass the TLS block. Commit it to a new branch called 'gemini-fix' and open a Pull Request immediately."

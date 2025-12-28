@@ -3,87 +3,81 @@ import pandas as pd
 import os
 from playwright.async_api import async_playwright
 
-API_KEY = os.getenv("ANT_KEY")
+# This matches the Secret name in your GitHub YAML
+BROWSER_WS_ENDPOINT = os.getenv("BROWSER_WS_ENDPOINT")
 
-async def run_proprietary_engine():
-    if not API_KEY:
-        print("Error: ANT_KEY not found")
+async def run_premium_engine():
+    if not BROWSER_WS_ENDPOINT:
+        print("Error: BROWSER_WS_ENDPOINT not found. Check GitHub Secrets.")
         return
 
     async with async_playwright() as p:
-        # Use the proxy to bypass the data center block
-        proxy_url = f"http://{API_KEY}:@proxy.scrapingant.com:8080"
-        browser = await p.chromium.launch(proxy={"server": proxy_url})
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0"
-        )
+        print("Connecting to Browserless.io remote browser...")
+        
+        # Connect to the high-trust remote browser
+        try:
+            browser = await p.chromium.connect_over_cdp(BROWSER_WS_ENDPOINT)
+        except Exception as e:
+            print(f"Failed to connect to remote browser: {e}")
+            return
+
+        context = await browser.new_context()
         page = await context.new_page()
         
         all_events = []
         
+        # We'll scan 5 pages to start
         for i in range(1, 6):
             url = f"https://www.travelok.com/listings/search/15?page={i}"
-            print(f"Deep Scanning Page {i}...")
+            print(f"Scanning Page {i}...")
             
             try:
-                # 1. Wait for Network to be completely quiet
+                # Browserless handles the JavaScript and waits for the page to be ready
                 await page.goto(url, wait_until="networkidle", timeout=60000)
                 
-                # 2. Force a human-like scroll and pause
-                await page.mouse.wheel(0, 1000)
-                await asyncio.sleep(5) 
-                
-                # 3. Capture a screenshot for the Action Artifacts
-                if i == 1:
-                    await page.screenshot(path="debug_screenshot.png")
-
-                # 4. BROAD DISCOVERY: Find every link on the page
-                # We look for ANY link containing '/view/' or text 'LEARN MORE'
+                # JAVASCRIPT EXTRACTION: This runs INSIDE the remote browser
+                # It looks for the event cards and pulls Title, Date, and Location
                 extracted = await page.evaluate("""
                     () => {
-                        const links = Array.from(document.querySelectorAll('a'));
-                        return links.map(l => ({
-                            href: l.getAttribute('href'),
-                            text: l.innerText,
-                            parentText: l.parentElement?.innerText
-                        })).filter(item => item.href && item.href.includes('/view/'));
+                        const items = Array.from(document.querySelectorAll('.listing-item, .card, a[href*="/view/"]'));
+                        return items.map(el => {
+                            const link = el.tagName === 'A' ? el : el.querySelector('a[href*="/view/"]');
+                            if (!link) return null;
+                            
+                            // Try to find text blocks near the link
+                            const container = el.closest('.listing-item') || el.parentElement;
+                            return {
+                                href: link.getAttribute('href'),
+                                title: link.innerText || "Unknown Event",
+                                info: container ? container.innerText.replace(/\\n/g, ' | ') : ""
+                            };
+                        }).filter(x => x !== null && x.href.includes('/view/'));
                     }
                 """)
                 
-                page_count = 0
                 for item in extracted:
-                    href = item['href']
-                    # Use the URL to create an ID
-                    event_id = href.split('/')[-1]
-                    
-                    # Try to find a real title: if text is 'LEARN MORE', use the parent text
-                    raw_title = item['text']
-                    if not raw_title or "LEARN MORE" in raw_title.upper():
-                        # Pick the first few words of the parent text as a fallback
-                        raw_title = item['parentText'].split('\\n')[0] if item['parentText'] else "Unknown Event"
-
+                    event_id = item['href'].split('/')[-1]
                     all_events.append({
                         "id": event_id,
-                        "title": raw_title.strip()[:100], # Clean and truncate
-                        "url": f"https://www.travelok.com{href}" if href.startswith("/") else href
+                        "title": item['title'].strip().split('|')[0][:100],
+                        "details": item['info'][:200], # Grab a snippet of the date/location
+                        "url": f"https://www.travelok.com{item['href']}" if item['href'].startswith("/") else item['href']
                     })
-                    page_count += 1
                 
-                print(f"Page {i}: Found {page_count} events.")
+                print(f"Page {i}: Found {len(extracted)} potential entries.")
                 
             except Exception as e:
-                print(f"Page {i} failed: {str(e)[:50]}")
+                print(f"Error on Page {i}: {str(e)[:100]}")
 
         if all_events:
-            df = pd.DataFrame(all_events).drop_duplicates(subset=['url'])
+            # Clean up duplicates
+            df = pd.DataFrame(all_events).drop_duplicates(subset=['id'])
             df.to_csv("master.csv", index=False)
-            print(f"Success! {len(df)} total events saved to master.csv")
+            print(f"Success! {len(df)} unique events saved to master.csv")
         else:
-            # If we STILL have zero, let's see the raw HTML structure
-            html = await page.content()
-            print(f"Structure Check: HTML length is {len(html)}. Top text: {html[:200]}")
+            print("No events found. Check if the website structure changed.")
         
         await browser.close()
 
 if __name__ == "__main__":
-    asyncio.run(run_proprietary_engine())
+    asyncio.run(run_premium_engine())

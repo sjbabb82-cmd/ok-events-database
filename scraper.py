@@ -1,41 +1,51 @@
-import requests
-import re
+import asyncio
+import os
+from playwright.async_api import async_playwright
 import pandas as pd
 
-def clean_slate_extract():
-    url = "https://www.travelok.com/listings/search/15"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
-    
-    print("Fetching raw data...")
-    r = requests.get(url, headers=headers)
-    html = r.text
-    
-    # We are looking for the pattern: /view/NUMBER/SLUG
-    # Example: /view/28491/redbud-festival
-    pattern = r'/view/(\d+)/([a-z0-9\-]+)'
-    matches = re.findall(pattern, html.lower())
-    
-    events = []
-    for match in matches:
-        listing_id = match[0]
-        slug = match[1].replace('-', ' ').title()
-        events.append({
-            "id": listing_id,
-            "title": slug,
-            "url": f"https://www.travelok.com/listings/view/{listing_id}"
-        })
+async def scrape():
+    async with async_playwright() as p:
+        # Connect to the remote browser
+        browser_url = os.getenv("BROWSER_WS_ENDPOINT")
+        browser = await p.chromium.connect_over_cdp(browser_url)
+        
+        # Set a realistic window size to trigger desktop layout
+        context = await browser.new_context(viewport={'width': 1920, 'height': 1080})
+        page = await context.new_page()
 
-    if events:
-        df = pd.DataFrame(events).drop_duplicates(subset=['id'])
-        df.to_csv("master.csv", index=False)
-        print(f"SUCCESS: Captured {len(df)} events using pattern matching.")
-        print(df.head(10))
-    else:
-        print("PATTERN MATCH FAILED.")
-        # If this fails, we need to see exactly what follows the word 'listing'
-        # Let's find the first instance of 'listing' and print the surrounding 200 chars
-        idx = html.lower().find('listing')
-        print(f"CONTEXT AROUND 'LISTING':\n...{html[idx:idx+300]}...")
+        print("Navigating...")
+        await page.goto("https://www.travelok.com/listings/search/15", wait_until="networkidle")
+
+        # Force scroll to trigger the lazy-load data injection
+        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        await asyncio.sleep(5) 
+
+        # Target the specific event links
+        selector = "a[href*='/listings/view/']"
+        try:
+            await page.wait_for_selector(selector, timeout=15000)
+            elements = await page.query_selector_all(selector)
+            
+            data = []
+            for el in elements:
+                title = await el.inner_text()
+                link = await el.get_attribute("href")
+                if title and link:
+                    data.append({
+                        "Title": title.strip(),
+                        "URL": f"https://www.travelok.com{link}" if link.startswith('/') else link
+                    })
+
+            if data:
+                df = pd.DataFrame(data).drop_duplicates()
+                df.to_csv("master.csv", index=False)
+                print(f"Success: {len(df)} events captured.")
+            else:
+                print("No data found on page.")
+        except Exception as e:
+            print(f"Error during extraction: {e}")
+
+        await browser.close()
 
 if __name__ == "__main__":
-    clean_slate_extract()
+    asyncio.run(scrape())
